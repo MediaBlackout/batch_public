@@ -114,21 +114,26 @@ python -m batch.batch_parse.parse jsonl_test/batch_RSSLinkhash_*.jsonl -o parsed
 
 Inspect `jsonl_test/` and `parsed/` to review input payloads and parsed results.
 
-## Programmatic Agent API
+## Agent Wrapper (`batch.agent_api`)
 
-External automation or agent systems can control the batch workflow directly
-from Python without invoking the CLI. Import the helper functions from
-`batch.agent_api`:
+Automation frameworks&mdash;including MCP&mdash;can trigger the pipeline
+programmatically using the lightweight wrapper in `batch.agent_api`.
 
 ```python
 from batch.agent_api import run_batch, resume_batch
 
-# Start a new batch run (waits for completion)
+# Start a new batch run and wait for the results
 run_batch("RSSLinkhash", hours=24, model="mini")
 
 # Resume a previously created batch
 resume_batch("batch_123abc")
 ```
+
+`run_batch` mirrors the CLI behaviour of `batch.main` and blocks until the job
+finishes and the output file is downloaded. `resume_batch` continues monitoring
+an existing batch. Ensure the environment variables listed in the
+[Configuration](#configuration) section are available when calling these
+functions.
 
 ## Templates
 
