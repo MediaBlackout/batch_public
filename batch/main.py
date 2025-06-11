@@ -70,8 +70,7 @@ STATUS_FILE = os.path.join(os.path.dirname(__file__), "batch_status.json")
 # successfully batched) in a lightweight JSON file next to the regular status
 # file.  The structure is
 #     {
-#         "DailySourceReviews": 1716241234,
-#         "GoogleTrendsData5min": 1716241111,
+#         "YOUR_TABLE_DATA_SOURCE_HERE": 1716241234,
 #         ...
 #     }
 # The file is purely advisory – if it is deleted we simply re-process the full
@@ -79,8 +78,8 @@ STATUS_FILE = os.path.join(os.path.dirname(__file__), "batch_status.json")
 # mechanism robust against manual clean-ups and cross-machine sync scenarios.
 #
 # *Only* tables that expose a usable timestamp participate in the watermark
-# logic.  For static reference data (e.g. Nasdaq100Constituents) we keep the
-# previous behaviour of always sending the full dataset.
+# logic.  For static reference data we keep the previous behaviour of always
+# sending the full dataset.
 
 WATERMARK_FILE = os.path.join(os.path.dirname(__file__), "batch_watermark.json")
 
@@ -150,7 +149,7 @@ def orchestrate(
     model_key: str,
     test_only: bool,
     *,
-    table_name: str = "DailySourceReviews",
+    table_name: str = "YOUR_TABLE_DATA_SOURCE_HERE",
     wait: bool = True,
 ) -> None:
     # ---------------------------------------------------------------------
@@ -525,7 +524,7 @@ def _auto_resume_pending() -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="DailySourceReviews batch processor")
+    parser = argparse.ArgumentParser(description="Batch processing helper")
     parser.add_argument("--hours", type=int, default=12, help="Lookback window in hours (default: 12)")
     from batch.models import MODEL_MAP, TEXT_CHAT_MODELS, EMBEDDING_MODELS
 
@@ -542,7 +541,7 @@ def main() -> None:
         action="append",
         help=(
             "Name of the DynamoDB table to process. Can be used multiple times. "
-            "Default: DailySourceReviews"
+            "Default: YOUR_TABLE_DATA_SOURCE_HERE"
         ),
     )
     parser.add_argument("--resume", metavar="ID", help="Resume monitoring an existing batch id")
@@ -674,10 +673,10 @@ def main() -> None:
                     raise ValueError("'enabled_tables' missing or empty")
             except Exception:
                 log.exception(
-                    "Unable to load enabled tables from %s – defaulting to DailySourceReviews",
+                    "Unable to load enabled tables from %s – defaulting to YOUR_TABLE_DATA_SOURCE_HERE",
                     cfg_path,
                 )
-                table_names = ["DailySourceReviews"]
+                table_names = ["YOUR_TABLE_DATA_SOURCE_HERE"]
 
         # If the user did *not* request synchronous execution but multiple
         # tables are being processed we implicitly switch to *async* mode so
