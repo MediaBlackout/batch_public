@@ -1,0 +1,11 @@
+{
+  "enabled_tables": [
+    "DailySourceReviews",
+    "GoogleTrendsData5min",
+    "Nasdaq100Constituents",
+    "NewsArticles",
+    "techreddit",
+    "google_news",
+    "RSSLinkhash"
+  ]
+}

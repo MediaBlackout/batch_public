@@ -1,0 +1,34 @@
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# Local env files
+.env
+.env.*
+
+# IDE/editor files
+.idea/
+.vscode/
+*.swp
+*~
+
+# Logs and runtime data
+**/jsonl/
+**/jsonl_test/
+**/logs/
+**/output/
+**/parsed/
+*.log
+batch_status.json
+batch_watermark.json
+cron_output.log
+
+# Python packaging
+build/
+dist/
+*.egg-info/
