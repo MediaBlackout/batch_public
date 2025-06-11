@@ -10,6 +10,7 @@ env/
 # Local env files
 .env
 .env.*
+!.env.example
 
 # IDE/editor files
 .idea/

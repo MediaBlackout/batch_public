@@ -41,6 +41,7 @@ pip install -e .
 ## Configuration
 
 Copy and customize the example environment file:
+The `.env.example` file is located in the project root.
 
 ```bash
 cp .env.example .env
