@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Batch Processing System
 
 A fault-tolerant, modular batch processing pipeline that integrates AWS DynamoDB data sources with the OpenAI Batch API. The system automates:
@@ -121,7 +120,3 @@ Use the helpers in [templates/news_table.py](templates/news_table.py) as a start
 ## License
 
 This project is licensed under the MIT License - see [LICENSE](LICENSE) for details.
-=======
-# batch_public
-Open AI Batch system / agent
->>>>>>> 9657a6ba445af74fe0db4bedd15de74cc5339032
