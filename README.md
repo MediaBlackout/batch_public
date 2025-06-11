@@ -61,19 +61,19 @@ AWS_REGION=us-east-1
 ### Run a batch job (synchronous)
 
 ```bash
-python -m batch.main --table RSSLinkhash --hours 24
+python -m batch.main --table YOUR_TABLE_DATA_SOURCE_HERE --hours 24
 ```
 
 ### Dry-run only (generate JSONL)
 
 ```bash
-python -m batch.main --table RSSLinkhash --hours 1 --test
+python -m batch.main --table YOUR_TABLE_DATA_SOURCE_HERE --hours 1 --test
 ```
 
 ### Submit and exit (asynchronous)
 
 ```bash
-python -m batch.main --table RSSLinkhash --async
+python -m batch.main --table YOUR_TABLE_DATA_SOURCE_HERE --async
 ```
 
 ### Resume polling for an existing batch
@@ -100,16 +100,16 @@ python -m batch.main --check-outputs
 python -m batch.batch_parse.parse output/batch_output_YYYYMMDD_HHMMSS.jsonl -o parsed/results.json
 ```
 
-## Quick Start: Testing with `RSSLinkhash`
+## Quick Start: Testing with `YOUR_TABLE_DATA_SOURCE_HERE`
 
-A minimal example to get started with the `RSSLinkhash` table:
+A minimal example to get started with the `YOUR_TABLE_DATA_SOURCE_HERE` table:
 
 ```bash
 # Dry-run JSONL generation
-python -m batch.main --table RSSLinkhash --hours 1 --test
+python -m batch.main --table YOUR_TABLE_DATA_SOURCE_HERE --hours 1 --test
 
 # Parse the generated JSONL
-python -m batch.batch_parse.parse jsonl_test/batch_RSSLinkhash_*.jsonl -o parsed/rsslinkhash_test.json
+python -m batch.batch_parse.parse jsonl_test/batch_YOUR_TABLE_DATA_SOURCE_HERE_*.jsonl -o parsed/YOUR_TABLE_DATA_SOURCE_HERE_test.json
 ```
 
 Inspect `jsonl_test/` and `parsed/` to review input payloads and parsed results.
@@ -123,7 +123,7 @@ programmatically using the lightweight wrapper in `batch.agent_api`.
 from batch.agent_api import run_batch, resume_batch
 
 # Start a new batch run and wait for the results
-run_batch("RSSLinkhash", hours=24, model="mini")
+run_batch("YOUR_TABLE_DATA_SOURCE_HERE", hours=24, model="mini")
 
 # Resume a previously created batch
 resume_batch("batch_123abc")
