@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Batch Processing System
 
 A fault-tolerant, modular batch processing pipeline that integrates AWS DynamoDB data sources with the OpenAI Batch API. The system automates:
@@ -114,6 +113,22 @@ python -m batch.batch_parse.parse jsonl_test/batch_RSSLinkhash_*.jsonl -o parsed
 
 Inspect `jsonl_test/` and `parsed/` to review input payloads and parsed results.
 
+## Programmatic Agent API
+
+External automation or agent systems can control the batch workflow directly
+from Python without invoking the CLI. Import the helper functions from
+`batch.agent_api`:
+
+```python
+from batch.agent_api import run_batch, resume_batch
+
+# Start a new batch run (waits for completion)
+run_batch("RSSLinkhash", hours=24, model="mini")
+
+# Resume a previously created batch
+resume_batch("batch_123abc")
+```
+
 ## Templates
 
 Use the helpers in [templates/news_table.py](templates/news_table.py) as a starting point for new tables. See [templates/README.md](templates/README.md) for details.
@@ -121,7 +136,3 @@ Use the helpers in [templates/news_table.py](templates/news_table.py) as a start
 ## License
 
 This project is licensed under the MIT License - see [LICENSE](LICENSE) for details.
-=======
-# batch_public
-Open AI Batch system / agent
->>>>>>> 9657a6ba445af74fe0db4bedd15de74cc5339032
