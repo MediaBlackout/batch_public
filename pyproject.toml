@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "batch"
+version = "0.1.0"
+description = "Batch processing system"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [{name = "Media Blackout LLC"}]
+
+dependencies = [
+    "boto3",
+    "openai",
+    "python-dotenv"
+]
+
+[project.scripts]
+batch = "batch.main:main"
