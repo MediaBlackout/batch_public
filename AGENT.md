@@ -10,7 +10,7 @@ other automation system.
 from batch.agent_api import run_batch
 
 # Launch a job and wait for completion
-run_batch("RSSLinkhash", hours=24, model="mini")
+run_batch("YOUR_TABLE_DATA_SOURCE_HERE", hours=24, model="mini")
 ```
 
 `run_batch` performs the same steps as running `python -m batch.main` but

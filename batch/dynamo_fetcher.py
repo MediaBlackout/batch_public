@@ -50,7 +50,7 @@ _NO_TS_FILTER: Set[str] = {
     "Nasdaq100Constituents",
     "GoogleTrendsData5min",
     "GoogleTrendsHistorical",
-    "RSSLinkhash",
+    "YOUR_TABLE_DATA_SOURCE_HERE",
 }
 
 # ---------------------------------------------------------------------------
@@ -293,7 +293,7 @@ def fetch_recent(
                 items = response.get("Items", [])
 
                 for item in items:
-                    # Some tables (e.g. *RSSLinkhash*) use slightly different
+                    # Some tables (e.g. *YOUR_TABLE_DATA_SOURCE_HERE*) use slightly different
                     # attribute names for the epoch timestamp.  We therefore
                     # try a handful of common alternatives before giving up.
 
