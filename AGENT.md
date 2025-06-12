@@ -1,8 +1,8 @@
 # Agent Integration
 
 This repository exposes a simple wrapper for launching and monitoring batch jobs
-programmatically. It lives in `batch.agent_api` and can be used by MCP or any
-other automation system.
+programmatically. The helper functions live in `batch.agent_api` and can be
+called from MCP or any standard agent framework.
 
 ## Starting a Batch
 

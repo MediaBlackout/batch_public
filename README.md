@@ -118,6 +118,8 @@ Inspect `jsonl_test/` and `parsed/` to review input payloads and parsed results.
 
 Automation frameworks&mdash;including MCP&mdash;can trigger the pipeline
 programmatically using the lightweight wrapper in `batch.agent_api`.
+These helpers block until the batch completes and the output file has been
+downloaded.
 
 ```python
 from batch.agent_api import run_batch, resume_batch
