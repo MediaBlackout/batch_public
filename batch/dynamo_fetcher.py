@@ -1,10 +1,10 @@
-"""Fetch recent *DailySourceReviews* items from DynamoDB.
+"""Fetch recent items from DynamoDB tables.
 
 Assumptions
 -----------
 * The DynamoDB table is located in *us-east-1* (but this can be overridden).
 * The items include an integer/number attribute named ``timestamp`` containing
-  the UTC epoch seconds when the review was created.
+  the UTC epoch seconds when the record was created.
 * The text to analyse lives under either ``summary`` (preferred), ``text`` or
   ``content`` – the first non-empty field wins.
 
@@ -47,10 +47,8 @@ log = get_logger(__name__)
 # disable the usual *cutoff* filter so every item is returned.
 
 _NO_TS_FILTER: Set[str] = {
-    "Nasdaq100Constituents",
-    "GoogleTrendsData5min",
     "GoogleTrendsHistorical",
-    "RSSLinkhash",
+    "YOUR_TABLE_DATA_SOURCE_HERE",
 }
 
 # ---------------------------------------------------------------------------
@@ -89,8 +87,8 @@ TIMESTAMP_KEYS: Set[str] = {
 def _extract_text(item: Dict[str, Any]) -> str | None:
     """Return the summary text from *item* if possible."""
 
-    # The Dynamo tables backing DailySourceReviews and related feeds are not
-    # 100 % consistent – different sources store the article body / summary
+    # DynamoDB tables often use slightly different attribute names for the
+    # article body / summary.
     # under slightly different attribute names.  To make the pipeline more
     # forgiving we iterate over a *superset* of likely candidates and return
     # the first non-empty string that we encounter instead of hard-coding a
@@ -120,13 +118,13 @@ def _extract_text(item: Dict[str, Any]) -> str | None:
         "company",
         "symbol",
 
-        # GoogleTrendsData5min specific fields
+        # Trend data specific fields
         "percent_increase",
         "search_volume",
         "source_page",
         "started_time_ago",
 
-        # Nasdaq100Constituents and similar market data columns
+        # Market data columns
         "avgvolume30",
         "bollingerlo",
         "bollingerup",
@@ -150,7 +148,7 @@ def _extract_text(item: Dict[str, Any]) -> str | None:
 
         # Convert basic numeric types to strings so we can still generate a
         # non-empty summary rather than skipping the record entirely.  This is
-        # primarily useful for GoogleTrendsData5min where fields like
+        # primarily useful for trend data where fields like
         # ``percent_increase`` or ``search_volume`` are stored as numbers.
         if isinstance(val, (int, float, Decimal)):
             return str(val)
@@ -173,7 +171,7 @@ def _extract_text(item: Dict[str, Any]) -> str | None:
 def fetch_recent(
     *,
     hours: int = 12,
-    table_name: str = "DailySourceReviews",
+    table_name: str = "YOUR_TABLE_DATA_SOURCE_HERE",
     region_name: str | None = None,
 ) -> List[Dict[str, Any]]:
     """Return items newer than *hours* from *table_name*.
@@ -293,7 +291,7 @@ def fetch_recent(
                 items = response.get("Items", [])
 
                 for item in items:
-                    # Some tables (e.g. *RSSLinkhash*) use slightly different
+                    # Some tables (e.g. *YOUR_TABLE_DATA_SOURCE_HERE*) use slightly different
                     # attribute names for the epoch timestamp.  We therefore
                     # try a handful of common alternatives before giving up.
 

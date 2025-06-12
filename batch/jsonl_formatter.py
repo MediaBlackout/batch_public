@@ -104,13 +104,13 @@ def write_jsonl(
                 "company",
                 "symbol",
 
-                # GoogleTrendsData5min specific fields
+                # Trend data specific fields
                 "percent_increase",
                 "search_volume",
                 "source_page",
                 "started_time_ago",
 
-                # Nasdaq100Constituents and related market data columns
+                # Market data columns
                 "avgvolume30",
                 "bollingerlo",
                 "bollingerup",
