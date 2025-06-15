@@ -1,4 +1,4 @@
-"""Minimal integration template for a *NewsArticles*-like DynamoDB table.
+"""Minimal integration template for a DynamoDB table.
 
 Copy this file, rename *TABLE_NAME* and adjust the field lists if your schema
 differs.  The helper demonstrates how to invoke the shared pipeline and does
@@ -15,7 +15,7 @@ from batch.main import orchestrate
 
 
 # DynamoDB table to process.  Replace with your table name.
-TABLE_NAME = "NewsArticles"
+TABLE_NAME = "YOUR_TABLE_DATA_SOURCE_HERE"
 
 
 def _build_cli() -> argparse.ArgumentParser:

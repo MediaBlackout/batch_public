@@ -1,8 +1,8 @@
 # Agent Integration
 
 This repository exposes a simple wrapper for launching and monitoring batch jobs
-programmatically. It lives in `batch.agent_api` and can be used by MCP or any
-other automation system.
+programmatically. The helper functions live in `batch.agent_api` and can be
+called from MCP or any standard agent framework.
 
 ## Starting a Batch
 
@@ -29,3 +29,7 @@ available.
 
 Ensure the environment variables shown in `.env.example` are configured before
 invoking these functions.
+
+For additional context on the overall batching system see the
+[README](README.md). If you have questions, reach out to
+[contact@mediablackout.ai](mailto:contact@mediablackout.ai).

@@ -118,6 +118,8 @@ Inspect `jsonl_test/` and `parsed/` to review input payloads and parsed results.
 
 Automation frameworks&mdash;including MCP&mdash;can trigger the pipeline
 programmatically using the lightweight wrapper in `batch.agent_api`.
+These helpers block until the batch completes and the output file has been
+downloaded.
 
 ```python
 from batch.agent_api import run_batch, resume_batch
@@ -133,11 +135,15 @@ resume_batch("batch_123abc")
 finishes and the output file is downloaded. `resume_batch` continues monitoring
 an existing batch. Ensure the environment variables listed in the
 [Configuration](#configuration) section are available when calling these
-functions.
+functions. Additional examples are provided in [AGENT.md](AGENT.md).
 
 ## Templates
 
 Use the helpers in [templates/news_table.py](templates/news_table.py) as a starting point for new tables. See [templates/README.md](templates/README.md) for details.
+
+## Contact
+
+For questions or support, email [contact@mediablackout.ai](mailto:contact@mediablackout.ai).
 
 ## License
 
