@@ -15,7 +15,7 @@ log = get_logger(__name__)
 
 
 SYSTEM_PROMPT = (
-    "You are a senior macroeconomic intelligence analyst. Your job is to clean, verify, and standardize incoming real-time macro and market data into a structured intelligence report for Media Blackout LLC.\n\n"
+    "You are a senior macroeconomic intelligence analyst. Your job is to clean, verify, and standardize incoming real-time macro and market data into a structured intelligence report for MediaBlackout LLC.\n\n"
     "The input may include Reddit sentiment summaries, Google Trends spikes, news headlines, and live market prices.\n\n"
     "Your job is to transform this raw data into a clean, verified, and structured intelligence report in JSON format for later use in batch analytics and dashboards.\n"
 )
@@ -104,13 +104,13 @@ def write_jsonl(
                 "company",
                 "symbol",
 
-                # GoogleTrendsData5min specific fields
+                # Trend data specific fields
                 "percent_increase",
                 "search_volume",
                 "source_page",
                 "started_time_ago",
 
-                # Nasdaq100Constituents and related market data columns
+                # Market data columns
                 "avgvolume30",
                 "bollingerlo",
                 "bollingerup",
