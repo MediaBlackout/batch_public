@@ -38,6 +38,8 @@ import boto3
 from boto3.dynamodb.conditions import Attr
 
 from batch.logger import get_logger
+from batch.text_utils import extract_text
+from batch.timestamp_utils import ts_to_int
 
 
 log = get_logger(__name__)
@@ -84,88 +86,9 @@ TIMESTAMP_KEYS: Set[str] = {
 }
 
 
-def _extract_text(item: Dict[str, Any]) -> str | None:
-    """Return the summary text from *item* if possible."""
-
-    # DynamoDB tables often use slightly different attribute names for the
-    # article body / summary.
-    # under slightly different attribute names.  To make the pipeline more
-    # forgiving we iterate over a *superset* of likely candidates and return
-    # the first non-empty string that we encounter instead of hard-coding a
-    # single field.
-
-    # Build a lowercase map so we can match keys case-insensitively without
-    # copying the original payload.
-    lower_map = {k.lower(): v for k, v in item.items()}
-
-    for key in (
-        "summary",
-        "text",
-        "content",
-        "review_summary",
-        "review_text",
-        "description",
-        "body",
-        "article",
-        "title",
-        "headline",
-        "selftext",
-        "query",
-        "keyword",
-        "term",
-        "trend_name",
-        "trend_breakdown",
-        "company",
-        "symbol",
-
-        # Trend data specific fields
-        "percent_increase",
-        "search_volume",
-        "source_page",
-        "started_time_ago",
-
-        # Market data columns
-        "avgvolume30",
-        "bollingerlo",
-        "bollingerup",
-        "changepct",
-        "changepctstr",
-        "highprice",
-        "lastprice",
-        "lastpricetime",
-        "lastupdated",
-        "lastvolume",
-        "lowprice",
-        "prevclose",
-        "rsi14",
-        "sma20",
-        "week52high",
-        "week52low",
-    ):
-        val = lower_map.get(key.lower())
-        if isinstance(val, str) and val.strip():
-            return val.strip()
-
-        # Convert basic numeric types to strings so we can still generate a
-        # non-empty summary rather than skipping the record entirely.  This is
-        # primarily useful for trend data where fields like
-        # ``percent_increase`` or ``search_volume`` are stored as numbers.
-        if isinstance(val, (int, float, Decimal)):
-            return str(val)
-
-        # If the value is a list/dict (e.g. ``trend_breakdown``) cast to a
-        # compact JSON string to retain structure while remaining within the
-        # textual payload constraints imposed by the Chat Completion API.
-        if isinstance(val, (list, dict)):
-            import json as _json
-
-            try:
-                compact = _json.dumps(val, ensure_ascii=False, separators=(",", ":"))
-                if compact:
-                    return compact
-            except Exception:
-                pass
-    return None
+# Text extraction logic has been moved to batch.text_utils.extract_text
+# to avoid duplication with jsonl_formatter.py
+_extract_text = extract_text  # Alias for backward compatibility
 
 
 def fetch_recent(
@@ -202,81 +125,8 @@ def fetch_recent(
     if hasattr(fetch_recent, "_seen_keys"):
         delattr(fetch_recent, "_seen_keys")
 
-    def _ts_to_int(value: Optional[Any]) -> Optional[int]:  # type: ignore[override]
-        """Best-effort conversion of *value* to an `int` epoch seconds.
-
-        Returns ``None`` when the conversion fails.
-        """
-
-        if value is None:
-            return None
-        if isinstance(value, int):
-            return value
-        if isinstance(value, float):
-            return int(value)
-        if isinstance(value, Decimal):
-            return int(value)
-        if isinstance(value, str):
-            try:
-                # Fast-path – value might be purely numeric (possibly quoted).
-                num = float(value)
-                # Heuristic: treat very large values as ms.
-                if num > 1e12:
-                    num /= 1000.0
-                return int(num)
-            except (ValueError, TypeError):
-                # Fall back to ISO-8601 parsing, e.g. "2025-05-19T21:20:00Z".
-                from datetime import datetime, timezone
-
-                try:
-                    # Replace trailing Z with +00:00 so fromisoformat accepts it
-                    iso_val = value.replace("Z", "+00:00") if value.endswith("Z") else value
-                    dt = datetime.fromisoformat(iso_val)
-                    if dt.tzinfo is None:
-                        dt = dt.replace(tzinfo=timezone.utc)
-                    return int(dt.timestamp())
-                except Exception:
-                    # Keep going – we may still be able to parse custom
-                    # timezone formats further down.
-                    pass
-        # ------------------------------------------------------------------
-        # Fallback for common non-ISO representations that include an explicit
-        # US/Eastern timezone abbreviation ("EST" or "EDT").  While
-        # ``datetime.fromisoformat`` is very forgiving, it deliberately
-        # rejects unknown/ambiguous timezone names.  We therefore handle the
-        # two most common abbreviations manually so integrators do *not* need
-        # to change their existing schema.
-        # ------------------------------------------------------------------
-
-        if isinstance(value, str):
-            from datetime import datetime, timezone, timedelta
-
-            val = value.strip()
-
-            for abbr, offset_hours in ((" EST", -5), (" EDT", -4)):
-                if val.endswith(abbr):
-                    try:
-                        # Remove the trailing abbreviation and attempt to
-                        # parse the remaining string using the same relaxed
-                        # ISO-8601 rules that ``fromisoformat`` employs
-                        # (space *or* 'T' between date and time).
-                        cleaned = val[: -len(abbr)].strip()
-                        # Accept both "YYYY-mm-dd HH:MM:SS" and
-                        # "YYYY-mm-ddTHH:MM:SS".
-                        if "T" in cleaned:
-                            fmt = "%Y-%m-%dT%H:%M:%S"
-                        else:
-                            fmt = "%Y-%m-%d %H:%M:%S"
-
-                        dt_naive = datetime.strptime(cleaned, fmt)
-                        dt = dt_naive.replace(tzinfo=timezone(timedelta(hours=offset_hours)))
-                        return int(dt.timestamp())
-                    except Exception:
-                        # Parsing failed – fall through so the caller can
-                        # inspect other alternatives.
-                        return None
-
-        return None  # unsupported type
+    # Use shared timestamp conversion function (moved to batch.timestamp_utils)
+    _ts_to_int = ts_to_int
 
     attempt = 0
     while attempt < 3:
