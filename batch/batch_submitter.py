@@ -28,10 +28,14 @@ load_dotenv()
 
 try:
     import openai
+    from openai import APIError, APIConnectionError, RateLimitError, APITimeoutError
 
     openai.api_key = os.getenv("OPENAI_API_KEY")
+    # Define tuple of retryable OpenAI exceptions
+    OPENAI_RETRYABLE_ERRORS = (APIError, APIConnectionError, RateLimitError, APITimeoutError)
 except ImportError:  # pragma: no cover – the library *should* be installed.
     openai = None  # type: ignore
+    OPENAI_RETRYABLE_ERRORS = (Exception,)  # Fallback to broad exception if openai not available
 
 
 class OpenAIUnavailable(RuntimeError):
@@ -57,9 +61,10 @@ def upload_file(path: str, *, purpose: str = "batch", max_retries: int = 3) -> A
                 file_obj = openai.files.create(file=fh, purpose=purpose)  # type: ignore[attr-defined]
             log.info("Uploaded JSONL (%s) – file_id=%s", path, file_obj.id)
             return file_obj
-        except Exception:  # noqa: BLE001
+        except OPENAI_RETRYABLE_ERRORS as e:
+            # Retry on transient OpenAI API errors
             attempt += 1
-            log.exception("Upload attempt %s for %s failed", attempt, path)
+            log.exception("Upload attempt %s for %s failed: %s", attempt, path, e)
             time.sleep(1 + attempt)
     raise RuntimeError(f"Failed to upload {path} after {max_retries} attempts")
 
@@ -111,8 +116,9 @@ def submit_batch(
             )
             log.info("Batch created – id=%s status=%s", batch.id, batch.status)
             return batch
-        except Exception:  # noqa: BLE001
+        except OPENAI_RETRYABLE_ERRORS as e:
+            # Retry on transient OpenAI API errors
             attempt += 1
-            log.exception("Batch create attempt %s failed", attempt)
+            log.exception("Batch create attempt %s failed: %s", attempt, e)
             time.sleep(1 + attempt)
     raise RuntimeError("Unable to create batch after retries")

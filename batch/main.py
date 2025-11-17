@@ -26,8 +26,9 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path as _Path
 
-_CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+_CURRENT_DIR = str(_Path(__file__).parent.resolve())
 # Ensure the current directory is discoverable when running as a script
 if _CURRENT_DIR not in sys.path:
     sys.path.insert(0, _CURRENT_DIR)
@@ -46,6 +47,7 @@ from batch.timestamp_utils import ts_to_int
 from batch.validation import validate_config_with_schema, validate_config_with_pydantic
 from batch.path_utils import CONFIG_FILE, SCHEMA_FILE, STATUS_FILE, WATERMARK_FILE, JSONL_TEST_DIR, ensure_dir
 import boto3
+from botocore.exceptions import ClientError, BotoCoreError
 from pathlib import Path
 
 # Optional dependency – only needed when OPENAI interaction is required.  We
@@ -68,8 +70,7 @@ log = get_logger(__name__)
 # specification provided by the infrastructure team.
 BATCHJOB_TABLE = os.getenv("BATCHJOB_TABLE", "batchjob")
 
-
-STATUS_FILE = os.path.join(os.path.dirname(__file__), "batch_status.json")
+# Note: STATUS_FILE and WATERMARK_FILE are imported from path_utils
 # Store the per-table *high-water-mark* (newest timestamp that has been
 # successfully batched) in a lightweight JSON file next to the regular status
 # file.  The structure is
@@ -84,8 +85,6 @@ STATUS_FILE = os.path.join(os.path.dirname(__file__), "batch_status.json")
 # *Only* tables that expose a usable timestamp participate in the watermark
 # logic.  For static reference data we keep the previous behaviour of always
 # sending the full dataset.
-
-WATERMARK_FILE = os.path.join(os.path.dirname(__file__), "batch_watermark.json")
 
 
 def _load_config() -> dict:
@@ -302,7 +301,7 @@ def _persist_batch_status(
         "created_utc": created_ts.isoformat(),
         "status": batch_status,
         "model": model_key,
-        "input_jsonl": os.path.basename(jsonl_path),
+        "input_jsonl": Path(jsonl_path).name,
         "input_file_id": input_file_id,
         "table_name": table_name,
         "record_count": record_count,
@@ -325,8 +324,9 @@ def _persist_batch_status(
             }
         )
         log.info("Recorded batch %s in DynamoDB table %s", batch_id, BATCHJOB_TABLE)
-    except Exception:
-        log.exception("Unable to write batch %s to DynamoDB table %s", batch_id, BATCHJOB_TABLE)
+    except (ClientError, BotoCoreError) as e:
+        # Best-effort DynamoDB write - log but don't fail the batch
+        log.exception("Unable to write batch %s to DynamoDB table %s: %s", batch_id, BATCHJOB_TABLE, e)
 
 
 def _update_final_status(batch_obj: Any, table_name: str, created_ts: datetime) -> None:
@@ -364,7 +364,8 @@ def _update_final_status(batch_obj: Any, table_name: str, created_ts: datetime) 
                     ":o": getattr(batch_obj, "output_file_id", None),
                 },
             )
-        except Exception:
+        except (ClientError, BotoCoreError):
+            # Item doesn't exist or update failed - fallback to put_item
             ts_val = key.get("timestamp") or created_ts.isoformat()
             merged = {
                 **key,
@@ -374,8 +375,9 @@ def _update_final_status(batch_obj: Any, table_name: str, created_ts: datetime) 
             }
             table.put_item(Item=merged)
         log.info("Updated batch %s in DynamoDB table %s", batch_obj.id, BATCHJOB_TABLE)
-    except Exception:
-        log.exception("Unable to update batch %s in DynamoDB table %s", batch_obj.id, BATCHJOB_TABLE)
+    except (ClientError, BotoCoreError) as e:
+        # Best-effort DynamoDB update - log but don't fail
+        log.exception("Unable to update batch %s in DynamoDB table %s: %s", batch_obj.id, BATCHJOB_TABLE, e)
 
 
 # Each invocation of *orchestrate()* handles **one** DynamoDB table so it can
@@ -527,8 +529,8 @@ def resume(batch_id: str) -> None:
                 key["table_name"] = item["table_name"]
             if "timestamp" in item:
                 key["timestamp"] = item["timestamp"]
-        except Exception:  # noqa: BLE001
-            # Best-effort – fall back to partial key.
+        except (ClientError, BotoCoreError):
+            # Best-effort – fall back to partial key if item not found
             pass
 
         try:
@@ -540,7 +542,8 @@ def resume(batch_id: str) -> None:
                     ":o": getattr(batch_obj, "output_file_id", None),
                 },
             )
-        except Exception:
+        except (ClientError, BotoCoreError):
+            # Item doesn't exist or update failed - fallback to put_item
             ts_val = key.get("timestamp") or status_data.get(batch_id, {}).get("created_utc")
             if ts_val is None:
                 from datetime import datetime, timezone
@@ -554,8 +557,8 @@ def resume(batch_id: str) -> None:
                 }
             )
         log.info("(resume) Updated batch %s in DynamoDB table %s", batch_id, BATCHJOB_TABLE)
-    except Exception:
-        log.exception("(resume) Unable to update batch %s in DynamoDB table %s", batch_id, BATCHJOB_TABLE)
+    except (ClientError, BotoCoreError) as e:
+        log.exception("(resume) Unable to update batch %s in DynamoDB table %s: %s", batch_id, BATCHJOB_TABLE, e)
 
 
 # ---------------------------------------------------------------------------
@@ -608,7 +611,7 @@ def _auto_resume_pending() -> None:
                 path = download_results(batch_obj.output_file_id)  # type: ignore[attr-defined]
                 status_data[batch_id]["final_status"] = "completed"
                 status_data[batch_id]["output_file_id"] = batch_obj.output_file_id
-                status_data[batch_id]["output_path"] = os.path.basename(path)
+                status_data[batch_id]["output_path"] = Path(path).name
             elif current_status in {"failed", "expired", "cancelled"}:
                 status_data[batch_id]["final_status"] = current_status
             else:
@@ -641,7 +644,7 @@ def _auto_resume_pending() -> None:
                             ":o": status_data[batch_id].get("output_file_id"),
                         },
                     )
-                except Exception:
+                except (ClientError, BotoCoreError):
                     # Fallback: perform an *upsert* so we never lose data even
                     # when the key schema is different than expected.
                     ts_val = status_data[batch_id].get("timestamp") or status_data[batch_id].get("created_utc")
@@ -653,8 +656,8 @@ def _auto_resume_pending() -> None:
                     table.put_item(Item=merged)
 
                 log.info("(auto-resume) Updated batch %s in DynamoDB", batch_id)
-            except Exception:
-                log.exception("(auto-resume) Unable to update batch %s in DynamoDB", batch_id)
+            except (ClientError, BotoCoreError) as e:
+                log.exception("(auto-resume) Unable to update batch %s in DynamoDB: %s", batch_id, e)
 
         except Exception:
             log.exception("(auto-resume) Error while checking batch %s", batch_id)
@@ -864,9 +867,8 @@ def main() -> None:
                 table_names.extend([x.strip() for x in t.split(",") if x.strip()])
         else:
             # Fall back to *batch_config.json*.
-            cfg_path = os.path.join(os.path.dirname(__file__), "batch_config.json")
             try:
-                with open(cfg_path, "r", encoding="utf-8") as fh:
+                with CONFIG_FILE.open("r", encoding="utf-8") as fh:
                     cfg = json.load(fh)
                 table_names = cfg.get("enabled_tables", [])
                 if not table_names:
@@ -874,7 +876,7 @@ def main() -> None:
             except Exception:
                 log.exception(
                     "Unable to load enabled tables from %s – defaulting to YOUR_TABLE_DATA_SOURCE_HERE",
-                    cfg_path,
+                    CONFIG_FILE,
                 )
                 table_names = ["YOUR_TABLE_DATA_SOURCE_HERE"]
 

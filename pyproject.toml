@@ -19,9 +19,16 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    # Testing
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "pytest-mock>=3.10",
+    # Type checking
     "mypy>=1.0",
+    # Validation
     "pydantic>=2.0",
     "jsonschema>=4.0",
+    # Type stubs
     "types-boto3",
     "types-jsonschema"
 ]
@@ -56,3 +63,41 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = "openai.*"
 ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--strict-markers",
+    "--tb=short",
+    "--cov=batch",
+    "--cov-report=term-missing",
+    "--cov-report=html",
+]
+markers = [
+    "integration: Integration tests (may be slow)",
+    "unit: Unit tests (fast)",
+]
+
+[tool.coverage.run]
+source = ["batch"]
+omit = [
+    "*/tests/*",
+    "*/test_*.py",
+    "*/__pycache__/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+]
