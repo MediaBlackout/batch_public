@@ -20,6 +20,7 @@ from decimal import Decimal
 from typing import List, Dict, Any, Optional, Set
 
 import boto3
+from botocore.exceptions import ClientError, BotoCoreError
 # NOTE: We *used* to apply a `timestamp >= cutoff` filter directly in the
 # `Scan` request (see git history for the previous implementation).  This only
 # works when the attribute is stored as a *Number* in DynamoDB.  Our production
@@ -213,9 +214,10 @@ def fetch_recent(
                 done = start_key is None
 
             break  # success – exit retry loop
-        except Exception:  # noqa: BLE001 (broad but re-raised after limit)
+        except (ClientError, BotoCoreError, ConnectionError) as e:
+            # Catch specific AWS/network errors for retry logic
             attempt += 1
-            log.exception("DynamoDB scan attempt %s failed", attempt)
+            log.exception("DynamoDB scan attempt %s failed: %s", attempt, e)
             if attempt >= 3:
                 raise
 

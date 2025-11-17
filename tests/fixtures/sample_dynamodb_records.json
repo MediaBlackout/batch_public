@@ -1,0 +1,37 @@
+[
+  {
+    "id": "record-001",
+    "timestamp": 1700000000,
+    "summary": "Federal Reserve announces interest rate decision. Markets react positively to the 25 basis point cut.",
+    "url": "https://example.com/fed-rate-decision",
+    "source": "financial_news"
+  },
+  {
+    "id": "record-002",
+    "timestamp": 1700001000,
+    "text": "Tech stocks rally as inflation data comes in lower than expected. NASDAQ up 2.3%.",
+    "link": "https://example.com/tech-rally",
+    "source": "market_data"
+  },
+  {
+    "id": "record-003",
+    "timestamp": "1700002000",
+    "content": "Employment report shows 200K new jobs added in November, beating expectations.",
+    "source_url": "https://example.com/employment-report",
+    "category": "economic_data"
+  },
+  {
+    "id": "record-004",
+    "created_at": "2024-01-15T10:30:00Z",
+    "description": "Oil prices surge on OPEC+ supply cut announcement.",
+    "guid": "https://example.com/oil-prices",
+    "source": "commodities"
+  },
+  {
+    "id": "record-005",
+    "timestamp": 1700003000,
+    "review_summary": "Analysis of Q4 GDP growth indicates strong economic momentum.",
+    "url": "https://example.com/gdp-analysis",
+    "tags": ["gdp", "growth", "economy"]
+  }
+]
