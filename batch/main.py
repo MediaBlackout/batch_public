@@ -42,7 +42,11 @@ from batch.jsonl_formatter import write_jsonl
 from batch.batch_submitter import upload_file, submit_batch
 from batch.status_checker import wait_for_completion, download_results
 from batch.logger import get_logger
+from batch.timestamp_utils import ts_to_int
+from batch.validation import validate_config_with_schema, validate_config_with_pydantic
+from batch.path_utils import CONFIG_FILE, SCHEMA_FILE, STATUS_FILE, WATERMARK_FILE, JSONL_TEST_DIR, ensure_dir
 import boto3
+from pathlib import Path
 
 # Optional dependency – only needed when OPENAI interaction is required.  We
 # try to import it here so *auto_resume_pending()* can use the same retrieval
@@ -87,15 +91,29 @@ WATERMARK_FILE = os.path.join(os.path.dirname(__file__), "batch_watermark.json")
 def _load_config() -> dict:
     """Load and validate batch configuration from batch_config.json.
 
-    Validates the config structure to ensure it has the required fields
-    and correct types. See batch_config.schema.json for the full schema.
+    Validates the config structure using both JSON schema and Pydantic models
+    to ensure it has the required fields and correct types.
+    See batch_config.schema.json for the full schema.
     """
-    cfg_path = os.path.join(os.path.dirname(__file__), "batch_config.json")
     try:
-        with open(cfg_path, "r", encoding="utf-8") as fh:
+        with CONFIG_FILE.open("r", encoding="utf-8") as fh:
             config = json.load(fh)
 
-        # Validate structure
+        # Validate against JSON schema if available
+        try:
+            validate_config_with_schema(config, str(SCHEMA_FILE))
+            log.debug("JSON schema validation passed")
+        except Exception as schema_err:
+            log.warning("JSON schema validation unavailable or failed: %s", schema_err)
+
+        # Validate with Pydantic models for runtime type checking
+        try:
+            validate_config_with_pydantic(config)
+            log.debug("Pydantic validation passed")
+        except Exception as pydantic_err:
+            log.warning("Pydantic validation unavailable or failed: %s", pydantic_err)
+
+        # Basic validation as fallback
         if "enabled_tables" not in config:
             raise ValueError("batch_config.json missing required 'enabled_tables' key")
 
@@ -105,23 +123,6 @@ def _load_config() -> dict:
         if not config["enabled_tables"]:
             raise ValueError("'enabled_tables' cannot be empty")
 
-        # Validate all table names are non-empty strings
-        for idx, table in enumerate(config["enabled_tables"]):
-            if not isinstance(table, str) or not table.strip():
-                raise ValueError(f"Table name at index {idx} must be a non-empty string")
-
-        # Validate optional fields if present
-        if "default_system_prompt" in config:
-            if not isinstance(config["default_system_prompt"], str):
-                raise ValueError("'default_system_prompt' must be a string")
-
-        if "table_prompts" in config:
-            if not isinstance(config["table_prompts"], dict):
-                raise ValueError("'table_prompts' must be an object/dictionary")
-            for table_name, prompt in config["table_prompts"].items():
-                if not isinstance(prompt, str):
-                    raise ValueError(f"Prompt for table '{table_name}' must be a string")
-
         log.debug("Configuration validation passed")
         return config
 
@@ -129,14 +130,14 @@ def _load_config() -> dict:
         log.error("Configuration validation failed: %s", e)
         raise SystemExit(1) from e
     except Exception as e:
-        log.warning("Unable to load config from %s – using defaults: %s", cfg_path, e)
+        log.warning("Unable to load config from %s – using defaults: %s", CONFIG_FILE, e)
         return {}
 
 
 def _load_status() -> dict:
-    if os.path.exists(STATUS_FILE):
+    if STATUS_FILE.exists():
         try:
-            with open(STATUS_FILE, "r", encoding="utf-8") as fh:
+            with STATUS_FILE.open("r", encoding="utf-8") as fh:
                 return json.load(fh)
         except Exception:
             log.exception("Unable to read %s", STATUS_FILE)
@@ -155,9 +156,9 @@ def _load_watermark() -> dict[str, int]:
     missing file.
     """
 
-    if os.path.exists(WATERMARK_FILE):
+    if WATERMARK_FILE.exists():
         try:
-            with open(WATERMARK_FILE, "r", encoding="utf-8") as fh:
+            with WATERMARK_FILE.open("r", encoding="utf-8") as fh:
                 data = json.load(fh)
             if isinstance(data, dict):
                 # Ensure all values are *int* so callers can compare directly
@@ -168,25 +169,213 @@ def _load_watermark() -> dict[str, int]:
 
 
 def _save_watermark(data: dict[str, int]) -> None:
-    tmp_path = WATERMARK_FILE + ".tmp"
+    tmp_path = WATERMARK_FILE.with_suffix(".json.tmp")
     try:
-        with open(tmp_path, "w", encoding="utf-8") as fh:
+        with tmp_path.open("w", encoding="utf-8") as fh:
             json.dump(data, fh, indent=2)
-        os.replace(tmp_path, WATERMARK_FILE)
+        tmp_path.replace(WATERMARK_FILE)
     except Exception:
         log.exception("Unable to persist watermark state to %s", WATERMARK_FILE)
 
 
 def _save_status(data: dict) -> None:
-    tmp_path = STATUS_FILE + ".tmp"
-    with open(tmp_path, "w", encoding="utf-8") as fh:
+    tmp_path = STATUS_FILE.with_suffix(".json.tmp")
+    with tmp_path.open("w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=2)
-    os.replace(tmp_path, STATUS_FILE)
+    tmp_path.replace(STATUS_FILE)
 
 
 # ----------------------------------------------------------------------------
 # Public orchestration helpers
 # ----------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Helper functions for orchestrate() - extracted to improve readability
+# ---------------------------------------------------------------------------
+
+
+def _filter_by_watermark(
+    items: list[Dict[str, Any]], table_name: str
+) -> tuple[list[Dict[str, Any]], Dict[str, int]]:
+    """Filter items by watermark and return filtered items + watermark data.
+
+    Args:
+        items: List of DynamoDB items to filter
+        table_name: Name of the table being processed
+
+    Returns:
+        Tuple of (filtered_items, watermark_data)
+    """
+    from batch.dynamo_fetcher import _NO_TS_FILTER, TIMESTAMP_KEYS as _TS_KEYS
+
+    watermark_data = _load_watermark()
+
+    # Skip watermark filtering for tables in the exclusion set
+    if table_name in _NO_TS_FILTER:
+        return items, watermark_data
+
+    last_ts = watermark_data.get(table_name, 0)
+
+    def _get_ts(record: Dict[str, Any]) -> Optional[int]:
+        """Return epoch seconds extracted from *record* or None."""
+        for k, v in record.items():
+            if k.lower() not in _TS_KEYS:
+                continue
+            timestamp = ts_to_int(v)
+            if timestamp is not None:
+                return timestamp
+        return None
+
+    new_items = [rec for rec in items if (_ts := _get_ts(rec)) is not None and _ts > last_ts]
+
+    if not new_items:
+        log.info(
+            "No new records after watermark filtering (last_ts=%s) – skipping table %s",
+            last_ts,
+            table_name,
+        )
+        return [], watermark_data
+
+    return new_items, watermark_data
+
+
+def _update_watermark(items: list[Dict[str, Any]], table_name: str, watermark_data: Dict[str, int]) -> None:
+    """Update watermark with maximum timestamp from items.
+
+    Args:
+        items: List of processed items
+        table_name: Name of the table
+        watermark_data: Current watermark data dictionary
+    """
+    from batch.dynamo_fetcher import _NO_TS_FILTER, TIMESTAMP_KEYS as _TS_KEYS
+
+    if table_name in _NO_TS_FILTER:
+        return
+
+    def _get_ts(record: Dict[str, Any]) -> Optional[int]:
+        """Return epoch seconds extracted from *record* or None."""
+        for k, v in record.items():
+            if k.lower() not in _TS_KEYS:
+                continue
+            timestamp = ts_to_int(v)
+            if timestamp is not None:
+                return timestamp
+        return None
+
+    max_ts = 0
+    for rec in items:
+        ts_val = _get_ts(rec)
+        if ts_val and ts_val > max_ts:
+            max_ts = ts_val
+
+    if max_ts:
+        watermark_data[table_name] = max_ts
+        _save_watermark(watermark_data)
+
+
+def _persist_batch_status(
+    batch_id: str,
+    batch_status: str,
+    model_key: str,
+    input_file_id: str,
+    table_name: str,
+    record_count: int,
+    jsonl_path: str,
+    created_ts: datetime,
+) -> None:
+    """Persist batch status to local file and DynamoDB.
+
+    Args:
+        batch_id: OpenAI batch ID
+        batch_status: Current batch status
+        model_key: Model key used
+        input_file_id: OpenAI file ID
+        table_name: Source table name
+        record_count: Number of records in batch
+        jsonl_path: Path to JSONL file
+        created_ts: Batch creation timestamp
+    """
+    # Save to local status file
+    status_data = _load_status()
+    status_data[batch_id] = {
+        "created_utc": created_ts.isoformat(),
+        "status": batch_status,
+        "model": model_key,
+        "input_jsonl": os.path.basename(jsonl_path),
+        "input_file_id": input_file_id,
+        "table_name": table_name,
+        "record_count": record_count,
+    }
+    _save_status(status_data)
+
+    # DynamoDB bookkeeping (best-effort – do *not* abort batch on failure)
+    try:
+        dynamodb = boto3.resource("dynamodb")
+        table = dynamodb.Table(BATCHJOB_TABLE)
+        table.put_item(
+            Item={
+                "batch_id": batch_id,
+                "timestamp": created_ts.isoformat(),
+                "table_name": table_name,
+                "status": batch_status,
+                "model": model_key,
+                "input_file_id": input_file_id,
+                "record_count": record_count,
+            }
+        )
+        log.info("Recorded batch %s in DynamoDB table %s", batch_id, BATCHJOB_TABLE)
+    except Exception:
+        log.exception("Unable to write batch %s to DynamoDB table %s", batch_id, BATCHJOB_TABLE)
+
+
+def _update_final_status(batch_obj: Any, table_name: str, created_ts: datetime) -> None:
+    """Update final batch status in local file and DynamoDB.
+
+    Args:
+        batch_obj: OpenAI batch object
+        table_name: Source table name
+        created_ts: Batch creation timestamp
+    """
+    # Update local status file
+    status_data = _load_status()
+    status_data[batch_obj.id].update(
+        {
+            "final_status": batch_obj.status,
+            "output_file_id": getattr(batch_obj, "output_file_id", None),
+        }
+    )
+    _save_status(status_data)
+
+    # Update DynamoDB record
+    try:
+        dynamodb = boto3.resource("dynamodb")
+        table = dynamodb.Table(BATCHJOB_TABLE)
+        key: dict[str, str] = {"batch_id": batch_obj.id}
+        key["table_name"] = table_name
+        key["timestamp"] = created_ts.isoformat()
+
+        try:
+            table.update_item(
+                Key=key,
+                UpdateExpression="SET final_status=:s, output_file_id=:o",
+                ExpressionAttributeValues={
+                    ":s": batch_obj.status,
+                    ":o": getattr(batch_obj, "output_file_id", None),
+                },
+            )
+        except Exception:
+            ts_val = key.get("timestamp") or created_ts.isoformat()
+            merged = {
+                **key,
+                "timestamp": ts_val,
+                "final_status": batch_obj.status,
+                "output_file_id": getattr(batch_obj, "output_file_id", None),
+            }
+            table.put_item(Item=merged)
+        log.info("Updated batch %s in DynamoDB table %s", batch_obj.id, BATCHJOB_TABLE)
+    except Exception:
+        log.exception("Unable to update batch %s in DynamoDB table %s", batch_obj.id, BATCHJOB_TABLE)
 
 
 # Each invocation of *orchestrate()* handles **one** DynamoDB table so it can
@@ -223,61 +412,9 @@ def orchestrate(
     # 1b.  Incremental *watermark* filtering – drop rows we have already sent.
     # ---------------------------------------------------------------------
 
-    from batch.dynamo_fetcher import _NO_TS_FILTER  # local import to avoid cycle
-
-    watermark_data = _load_watermark()
-    if table_name not in _NO_TS_FILTER:
-        last_ts = watermark_data.get(table_name, 0)
-
-        def _get_ts(record: Dict[str, Any]) -> Optional[int]:  # type: ignore[override]
-            """Return epoch seconds extracted from *record* or None."""
-
-# Re-use canonical key set defined in *batch.dynamo_fetcher* so the
-# high-water-mark logic stays in sync with the main fetch implementation.
-            from batch.dynamo_fetcher import TIMESTAMP_KEYS as _TS_KEYS  # local import to avoid cycle
-
-            value: Any | None = None
-            for k, v in record.items():
-                if k.lower() not in _TS_KEYS:
-                    continue
-                value_candidate = v
-
-                # Convert to int epoch seconds using same heuristics
-                timestamp: Optional[int] = None
-                if isinstance(value_candidate, int):
-                    timestamp = value_candidate
-                elif isinstance(value_candidate, float):
-                    timestamp = int(value_candidate)
-                elif isinstance(value_candidate, str):
-                    try:
-                        num = float(value_candidate)
-                        if num > 1e12:
-                            num /= 1000.0
-                        timestamp = int(num)
-                    except Exception:
-                        pass
-                else:
-                    try:
-                        from decimal import Decimal
-
-                        if isinstance(value_candidate, Decimal):
-                            timestamp = int(value_candidate)
-                    except Exception:
-                        pass
-
-                if timestamp is not None:
-                    return timestamp
-
-            # Either no matching keys or none convertible to epoch seconds.
-            return None
-
-        new_items = [rec for rec in items if (_ts := _get_ts(rec)) is not None and _ts > last_ts]
-
-        if not new_items:
-            log.info("No new records after watermark filtering (last_ts=%s) – skipping table %s", last_ts, table_name)
-            return
-
-        items = new_items  # keep only unseen rows
+    items, watermark_data = _filter_by_watermark(items, table_name)
+    if not items:
+        return  # No new items after watermark filtering
 
     # ---------------------------------------------------------------------
     # 2. Build JSONL file and capture written record count.
@@ -291,11 +428,11 @@ def orchestrate(
     # ---------------------------------------------------------------------
 
     if test_only:
-        test_dir = os.path.join(os.path.dirname(__file__), "jsonl_test")
+        ensure_dir(JSONL_TEST_DIR)
         jsonl_path, record_count = write_jsonl(
             items,
             model_key=model_key,
-            output_dir=test_dir,
+            output_dir=str(JSONL_TEST_DIR),
             tag=table_name,
             config=config,
             table_name=table_name,
@@ -320,21 +457,10 @@ def orchestrate(
     # ------------------------------------------------------------------
     # Watermark update – persist new maximum timestamp *before* we leave
     # orchestrate so follow-up runs do not resend the same rows even when the
-    # OpenAI call fails mid-way.  We only update for tables that participate
-    # in the timestamp-based filtering described above.
+    # OpenAI call fails mid-way.
     # ------------------------------------------------------------------
 
-    if table_name not in _NO_TS_FILTER:
-        # Re-use helper defined earlier in this function.
-        max_ts = 0
-        for rec in items:
-            ts_val = _get_ts(rec)
-            if ts_val and ts_val > max_ts:
-                max_ts = ts_val
-
-        if max_ts:
-            watermark_data[table_name] = max_ts
-            _save_watermark(watermark_data)
+    _update_watermark(items, table_name, watermark_data)
 
     # 3. Upload file & create batch.
     file_obj = upload_file(jsonl_path)
@@ -342,37 +468,16 @@ def orchestrate(
 
     # 4. Persist status (both locally **and** optionally in DynamoDB).
     created_ts = datetime.now(timezone.utc)
-
-    status_data = _load_status()
-    status_data[batch_obj.id] = {
-        "created_utc": created_ts.isoformat(),
-        "status": batch_obj.status,
-        "model": model_key,
-        "input_jsonl": os.path.basename(jsonl_path),
-        "input_file_id": file_obj.id,
-        "table_name": table_name,
-        "record_count": record_count,
-    }
-    _save_status(status_data)
-
-    # DynamoDB bookkeeping (best-effort – do *not* abort batch on failure).
-    try:
-        dynamodb = boto3.resource("dynamodb")
-        table = dynamodb.Table(BATCHJOB_TABLE)
-        table.put_item(
-            Item={
-                "batch_id": batch_obj.id,
-                "timestamp": created_ts.isoformat(),
-                "table_name": table_name,
-                "status": batch_obj.status,
-                "model": model_key,
-                "input_file_id": file_obj.id,
-                "record_count": record_count,
-            }
-        )
-        log.info("Recorded batch %s in DynamoDB table %s", batch_obj.id, BATCHJOB_TABLE)
-    except Exception:
-        log.exception("Unable to write batch %s to DynamoDB table %s", batch_obj.id, BATCHJOB_TABLE)
+    _persist_batch_status(
+        batch_id=batch_obj.id,
+        batch_status=batch_obj.status,
+        model_key=model_key,
+        input_file_id=file_obj.id,
+        table_name=table_name,
+        record_count=record_count,
+        jsonl_path=jsonl_path,
+        created_ts=created_ts,
+    )
 
     if not wait:
         log.info(
@@ -388,44 +493,13 @@ def orchestrate(
 
     batch_obj = wait_for_completion(batch_obj.id)
 
-    # Update final status.
-    status_data[batch_obj.id].update(
-        {
-            "final_status": batch_obj.status,
-            "output_file_id": getattr(batch_obj, "output_file_id", None),
-        }
-    )
-    _save_status(status_data)
+    # Update final status
+    _update_final_status(batch_obj, table_name, created_ts)
 
     if batch_obj.status == "completed":
         download_results(batch_obj.output_file_id)  # type: ignore[attr-defined]
     else:
         log.error("Batch %s finished with status %s", batch_obj.id, batch_obj.status)
-
-    # Update DynamoDB record.
-    try:
-        dynamodb = boto3.resource("dynamodb")
-        table = dynamodb.Table(BATCHJOB_TABLE)
-        key: dict[str, str] = {"batch_id": batch_obj.id}
-        key["table_name"] = table_name
-        key["timestamp"] = created_ts.isoformat()
-
-        try:
-            table.update_item(
-                Key=key,
-                UpdateExpression="SET final_status=:s, output_file_id=:o",
-                ExpressionAttributeValues={
-                    ":s": batch_obj.status,
-                    ":o": getattr(batch_obj, "output_file_id", None),
-                },
-            )
-        except Exception:
-            ts_val = key.get("timestamp") or created_ts.isoformat()
-            merged = {**key, "timestamp": ts_val, "final_status": batch_obj.status, "output_file_id": getattr(batch_obj, "output_file_id", None)}
-            table.put_item(Item=merged)
-        log.info("Updated batch %s in DynamoDB table %s", batch_obj.id, BATCHJOB_TABLE)
-    except Exception:
-        log.exception("Unable to update batch %s in DynamoDB table %s", batch_obj.id, BATCHJOB_TABLE)
 
 
 def resume(batch_id: str) -> None:

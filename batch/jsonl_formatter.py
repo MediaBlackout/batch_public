@@ -9,6 +9,7 @@ from typing import List, Dict, Any
 
 from batch.logger import get_logger
 from batch.models import resolve
+from batch.text_utils import extract_text
 
 
 log = get_logger(__name__)
@@ -109,76 +110,9 @@ def write_jsonl(
     written = skipped = 0
     with open(path, "w", encoding="utf-8") as fh:
         for item in items:
-            # Use the same generous field search that *dynamo_fetcher._extract_text*
-            # applies so we do **not** discard rows that were deemed usable
-            # during the fetch step.
-
-            summary = None
-            lower_map = {k.lower(): v for k, v in item.items()}
-
-            for key in (
-                "summary",
-                "text",
-                "content",
-                "review_summary",
-                "review_text",
-                "description",
-                "body",
-                "article",
-                "title",
-                "headline",
-                "selftext",
-                "query",
-                "keyword",
-                "term",
-                "trend_name",
-                "trend_breakdown",
-                "company",
-                "symbol",
-
-                # Trend data specific fields
-                "percent_increase",
-                "search_volume",
-                "source_page",
-                "started_time_ago",
-
-                # Market data columns
-                "avgvolume30",
-                "bollingerlo",
-                "bollingerup",
-                "changepct",
-                "changepctstr",
-                "highprice",
-                "lastprice",
-                "lastpricetime",
-                "lastupdated",
-                "lastvolume",
-                "lowprice",
-                "prevclose",
-                "rsi14",
-                "sma20",
-                "week52high",
-                "week52low",
-            ):
-                value = lower_map.get(key.lower())
-
-                if isinstance(value, str) and value.strip():
-                    summary = value.strip()
-                    break
-
-                # Convert simple numeric types to strings so rows that only
-                # contain e.g. ``percent_increase`` are not discarded.
-                if isinstance(value, (int, float)):
-                    summary = str(value)
-                    break
-
-                if isinstance(value, (list, dict)):
-                    import json as _json
-                    try:
-                        summary = _json.dumps(value, ensure_ascii=False, separators=(",", ":"))
-                        break
-                    except Exception:
-                        pass
+            # Use the shared text extraction function to ensure consistent
+            # field handling across the pipeline
+            summary = extract_text(item)
             if not summary:
                 skipped += 1
                 continue
