@@ -84,6 +84,55 @@ STATUS_FILE = os.path.join(os.path.dirname(__file__), "batch_status.json")
 WATERMARK_FILE = os.path.join(os.path.dirname(__file__), "batch_watermark.json")
 
 
+def _load_config() -> dict:
+    """Load and validate batch configuration from batch_config.json.
+
+    Validates the config structure to ensure it has the required fields
+    and correct types. See batch_config.schema.json for the full schema.
+    """
+    cfg_path = os.path.join(os.path.dirname(__file__), "batch_config.json")
+    try:
+        with open(cfg_path, "r", encoding="utf-8") as fh:
+            config = json.load(fh)
+
+        # Validate structure
+        if "enabled_tables" not in config:
+            raise ValueError("batch_config.json missing required 'enabled_tables' key")
+
+        if not isinstance(config["enabled_tables"], list):
+            raise ValueError("'enabled_tables' must be a list")
+
+        if not config["enabled_tables"]:
+            raise ValueError("'enabled_tables' cannot be empty")
+
+        # Validate all table names are non-empty strings
+        for idx, table in enumerate(config["enabled_tables"]):
+            if not isinstance(table, str) or not table.strip():
+                raise ValueError(f"Table name at index {idx} must be a non-empty string")
+
+        # Validate optional fields if present
+        if "default_system_prompt" in config:
+            if not isinstance(config["default_system_prompt"], str):
+                raise ValueError("'default_system_prompt' must be a string")
+
+        if "table_prompts" in config:
+            if not isinstance(config["table_prompts"], dict):
+                raise ValueError("'table_prompts' must be an object/dictionary")
+            for table_name, prompt in config["table_prompts"].items():
+                if not isinstance(prompt, str):
+                    raise ValueError(f"Prompt for table '{table_name}' must be a string")
+
+        log.debug("Configuration validation passed")
+        return config
+
+    except ValueError as e:
+        log.error("Configuration validation failed: %s", e)
+        raise SystemExit(1) from e
+    except Exception as e:
+        log.warning("Unable to load config from %s – using defaults: %s", cfg_path, e)
+        return {}
+
+
 def _load_status() -> dict:
     if os.path.exists(STATUS_FILE):
         try:
@@ -152,6 +201,12 @@ def orchestrate(
     table_name: str = "YOUR_TABLE_DATA_SOURCE_HERE",
     wait: bool = True,
 ) -> None:
+    # ---------------------------------------------------------------------
+    # 0. Load batch configuration for system prompts.
+    # ---------------------------------------------------------------------
+
+    config = _load_config()
+
     # ---------------------------------------------------------------------
     # 1. Fetch from DynamoDB.
     # ---------------------------------------------------------------------
@@ -242,9 +297,17 @@ def orchestrate(
             model_key=model_key,
             output_dir=test_dir,
             tag=table_name,
+            config=config,
+            table_name=table_name,
         )
     else:
-        jsonl_path, record_count = write_jsonl(items, model_key=model_key, tag=table_name)
+        jsonl_path, record_count = write_jsonl(
+            items,
+            model_key=model_key,
+            tag=table_name,
+            config=config,
+            table_name=table_name,
+        )
 
     if record_count == 0:
         log.info("All fetched items lacked usable text – skipping table %s", table_name)
@@ -523,6 +586,34 @@ def _auto_resume_pending() -> None:
             log.exception("(auto-resume) Error while checking batch %s", batch_id)
 
 
+def _validate_environment() -> None:
+    """Validate required environment variables are set."""
+    missing_vars = []
+
+    # Required variables
+    required_vars = {
+        "OPENAI_API_KEY": "OpenAI API key for batch processing",
+        "AWS_ACCESS_KEY_ID": "AWS access key for DynamoDB access",
+        "AWS_SECRET_ACCESS_KEY": "AWS secret key for DynamoDB access",
+    }
+
+    for var_name, description in required_vars.items():
+        if not os.getenv(var_name):
+            missing_vars.append(f"  - {var_name}: {description}")
+
+    if missing_vars:
+        error_msg = (
+            "Missing required environment variables:\n"
+            + "\n".join(missing_vars)
+            + "\n\nPlease set these variables in your .env file or environment.\n"
+            + "See .env.example for reference."
+        )
+        log.error(error_msg)
+        raise SystemExit(1)
+
+    log.debug("Environment validation passed")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Batch processing helper")
     parser.add_argument("--hours", type=int, default=12, help="Lookback window in hours (default: 12)")
@@ -594,8 +685,43 @@ def main() -> None:
         help="Explicit OpenAI API key (overrides environment/.env)",
     )
 
+    # Logging verbosity flags
+    parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Enable debug logging (more verbose output)",
+    )
+    parser.add_argument(
+        "--quiet",
+        "-q",
+        action="store_true",
+        help="Quiet mode - only show warnings and errors",
+    )
+
     args = parser.parse_args()
 
+    # ---------------------------------------------------------------------
+    # Validate required environment variables are set
+    # ---------------------------------------------------------------------
+    _validate_environment()
+
+    # ---------------------------------------------------------------------
+    # Apply log level based on CLI flags or environment variable
+    # ---------------------------------------------------------------------
+    from batch.logger import set_log_level
+    import logging as _logging
+
+    if args.verbose and args.quiet:
+        log.error("Cannot use both --verbose and --quiet flags")
+        raise SystemExit(1)
+
+    if args.verbose:
+        set_log_level(_logging.DEBUG)
+        log.debug("Debug logging enabled")
+    elif args.quiet:
+        set_log_level(_logging.WARNING)
+    # Otherwise, LOG_LEVEL env var is already applied by get_logger()
 
     # ---------------------------------------------------------------------
     # Apply explicit API key override *early* so every downstream module uses

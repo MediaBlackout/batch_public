@@ -14,19 +14,25 @@ from batch.models import resolve
 log = get_logger(__name__)
 
 
-SYSTEM_PROMPT = (
-    "You are a senior macroeconomic intelligence analyst. Your job is to clean, verify, and standardize incoming real-time macro and market data into a structured intelligence report for Media Blackout LLC.\n\n"
-    "The input may include Reddit sentiment summaries, Google Trends spikes, news headlines, and live market prices.\n\n"
-    "Your job is to transform this raw data into a clean, verified, and structured intelligence report in JSON format for later use in batch analytics and dashboards.\n"
+# Default fallback prompt if no config is provided
+DEFAULT_SYSTEM_PROMPT = (
+    "You are an AI assistant that processes and analyzes data. "
+    "Transform the input data into a clean, structured format suitable for analysis."
 )
 
 
-def _build_payload(summary_text: str, *, model: str, source_id: str | None) -> Dict[str, Any]:
+def _build_payload(
+    summary_text: str,
+    *,
+    model: str,
+    source_id: str | None,
+    system_prompt: str,
+) -> Dict[str, Any]:
     """Return a JSON-serialisable payload for one summary."""
 
     payload: Dict[str, Any] = {
         "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": summary_text},
         ],
         "model": model,
@@ -45,6 +51,8 @@ def write_jsonl(
     model_key: str = "nano",
     output_dir: str | None = None,
     tag: str | None = None,
+    config: Dict[str, Any] | None = None,
+    table_name: str | None = None,
 ) -> tuple[str, int]:
     """Write *items* to a new JSONL file.
 
@@ -52,11 +60,35 @@ def write_jsonl(
     number of JSONL records written (i.e. lines in the resulting file).  This
     is useful for downstream bookkeeping so callers do not have to count the
     lines themselves.
+
+    Args:
+        items: List of dictionaries to convert to JSONL
+        model_key: Model identifier (e.g., "nano", "mini")
+        output_dir: Directory to write JSONL file to
+        tag: Optional tag to include in filename
+        config: Batch configuration dictionary (for system prompts)
+        table_name: Name of the table being processed (for table-specific prompts)
     """
 
     if output_dir is None:
         output_dir = os.path.join(os.path.dirname(__file__), "jsonl")
     os.makedirs(output_dir, exist_ok=True)
+
+    # Determine which system prompt to use
+    system_prompt = DEFAULT_SYSTEM_PROMPT
+    if config:
+        # Check for table-specific prompt first
+        if table_name and "table_prompts" in config:
+            table_prompts = config.get("table_prompts", {})
+            if table_name in table_prompts:
+                system_prompt = table_prompts[table_name]
+                log.debug("Using table-specific prompt for %s", table_name)
+            elif "default_system_prompt" in config:
+                system_prompt = config["default_system_prompt"]
+                log.debug("Using default system prompt from config")
+        elif "default_system_prompt" in config:
+            system_prompt = config["default_system_prompt"]
+            log.debug("Using default system prompt from config")
 
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M")
     if tag:
@@ -151,7 +183,12 @@ def write_jsonl(
                 skipped += 1
                 continue
 
-            payload = _build_payload(summary, model=model_name, source_id=item.get("id"))
+            payload = _build_payload(
+                summary,
+                model=model_name,
+                source_id=item.get("id"),
+                system_prompt=system_prompt,
+            )
 
             # -----------------------------------------------------------------
             # The OpenAI Batch API (as of 2025-05) requires each JSONL record to

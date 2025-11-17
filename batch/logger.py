@@ -25,6 +25,9 @@ def get_logger(name: str) -> logging.Logger:
     file, a rotating file handler is attached as well as a stream handler so
     logs are also echoed to stdout. Subsequent calls simply return the same
     configured logger instance so we never add duplicate handlers.
+
+    The log level can be set via the LOG_LEVEL environment variable or
+    by calling set_log_level() after initialization.
     """
 
     base_dir = os.path.dirname(__file__)
@@ -36,7 +39,10 @@ def get_logger(name: str) -> logging.Logger:
         # Already configured by an earlier call.
         return logger
 
-    logger.setLevel(logging.INFO)
+    # Default to INFO, but allow override via environment variable
+    log_level_name = os.getenv("LOG_LEVEL", "INFO").upper()
+    log_level = getattr(logging, log_level_name, logging.INFO)
+    logger.setLevel(log_level)
 
     # File handler (rotating).
     logger.addHandler(_build_handler(logs_dir))
@@ -52,3 +58,22 @@ def get_logger(name: str) -> logging.Logger:
     logger.propagate = False
 
     return logger
+
+
+def set_log_level(level: int) -> None:
+    """Set the log level for all batch loggers.
+
+    Args:
+        level: Logging level (e.g., logging.DEBUG, logging.INFO, logging.WARNING)
+
+    This affects all loggers in the 'batch' namespace and should be called
+    early in the application lifecycle (e.g., after parsing CLI arguments).
+    """
+    # Set level for all existing batch loggers
+    for name in logging.Logger.manager.loggerDict:
+        if name.startswith("batch"):
+            logger = logging.getLogger(name)
+            logger.setLevel(level)
+
+    # Set level for the root batch logger to catch new loggers
+    logging.getLogger("batch").setLevel(level)
