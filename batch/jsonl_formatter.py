@@ -45,6 +45,7 @@ def write_jsonl(
     model_key: str = "nano",
     output_dir: str | None = None,
     tag: str | None = None,
+    endpoint: str = "/v1/chat/completions",
 ) -> tuple[str, int]:
     """Write *items* to a new JSONL file.
 
@@ -52,6 +53,13 @@ def write_jsonl(
     number of JSONL records written (i.e. lines in the resulting file).  This
     is useful for downstream bookkeeping so callers do not have to count the
     lines themselves.
+
+    Args:
+        items: List of DynamoDB records to process
+        model_key: Model identifier (nano/mini/full) or actual model name
+        output_dir: Directory to write the JSONL file
+        tag: Optional tag to include in the filename
+        endpoint: OpenAI API endpoint (/v1/chat/completions or /v1/embeddings)
     """
 
     if output_dir is None:
@@ -151,7 +159,16 @@ def write_jsonl(
                 skipped += 1
                 continue
 
-            payload = _build_payload(summary, model=model_name, source_id=item.get("id"))
+            # Build the appropriate payload based on the endpoint
+            if endpoint == "/v1/embeddings":
+                # For embeddings, we just need the input text and model
+                payload = {
+                    "input": summary,
+                    "model": model_name,
+                }
+            else:
+                # For chat completions, use the existing payload builder
+                payload = _build_payload(summary, model=model_name, source_id=item.get("id"))
 
             # -----------------------------------------------------------------
             # The OpenAI Batch API (as of 2025-05) requires each JSONL record to
@@ -168,7 +185,7 @@ def write_jsonl(
             record = {
                 "custom_id": f"row_{written + 1}",  # 1-based, <=64 chars
                 "method": "POST",
-                "url": "/v1/chat/completions",
+                "url": endpoint,
                 "body": payload,
             }
 
