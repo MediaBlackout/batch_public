@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://batch-processing.example.com/schemas/batch_config.schema.json",
+  "title": "Batch Processing Configuration",
+  "description": "Configuration schema for the batch processing system",
+  "type": "object",
+  "required": ["enabled_tables"],
+  "properties": {
+    "enabled_tables": {
+      "type": "array",
+      "description": "List of DynamoDB table names to process",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^[a-zA-Z0-9_.-]+$"
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "default_system_prompt": {
+      "type": "string",
+      "description": "Default system prompt used for all tables unless overridden",
+      "minLength": 1
+    },
+    "table_prompts": {
+      "type": "object",
+      "description": "Table-specific system prompts that override the default",
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "additionalProperties": false
+}
